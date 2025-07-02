@@ -26,6 +26,7 @@
 #include <utility>
 #include <type_traits>
 #include <ranges>
+#include <variant>
 
 namespace tl {
    template <class T>
@@ -56,17 +57,25 @@ namespace tl {
             }
          }
 
-         std::suspend_always yield_value(reference_type v) noexcept {
-            if constexpr (std::is_pointer_v<value_type>) {
-               value_ = v;
-            } else {
-               value_ = std::addressof(v);
-            }
+         std::suspend_always yield_value(value_type &&v) noexcept {
+            value_ = std::move(v);
+            return {};
+         }
+
+         std::suspend_always yield_value(value_type const &v) noexcept
+         requires (!std::is_reference_v<T>) {
+             value_ = v;
+             return {};
+         }
+
+         std::suspend_always yield_value(value_type &v) noexcept
+         requires (std::is_reference_v<T>) {
+            value_ = &v;
             return {};
          }
 
          std::exception_ptr exception_;
-         pointer_type value_;
+         std::variant<std::monostate, value_type, value_type *> value_;
       };
 
    public:
@@ -113,11 +122,27 @@ namespace tl {
          }
 
          reference_type operator*() const
-            noexcept(noexcept(std::is_nothrow_copy_constructible_v<reference_type>)){
-            if constexpr (std::is_pointer_v<value_type>)
-               return handle_.promise().value_;
-            else
-               return *handle_.promise().value_;
+            noexcept(noexcept(std::is_nothrow_copy_constructible_v<reference_type>))
+            requires (std::is_reference_v<T>) {
+            return *std::get<value_type*>(handle_.promise().value_);
+         }
+
+         reference_type operator*() const
+            noexcept(noexcept(std::is_nothrow_copy_constructible_v<reference_type>))
+            requires (!std::is_reference_v<T>) {
+            return std::get<value_type>(handle_.promise().value_);
+         }
+
+         value_type* operator->() const
+            noexcept(noexcept(std::is_nothrow_copy_constructible_v<reference_type>))
+            requires (std::is_reference_v<T>) {
+            return std::get<value_type *>(handle_.promise().value_);
+         }
+
+         value_type* operator->() const
+            noexcept(noexcept(std::is_nothrow_copy_constructible_v<reference_type>))
+            requires (!std::is_reference_v<T>) {
+            return &std::get<value_type>(handle_.promise().value_);
          }
 
       private:
